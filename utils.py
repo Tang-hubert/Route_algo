@@ -1,56 +1,48 @@
 # utils.py
-import math
-import pandas as pd
+from math import radians, sin, cos, sqrt, atan2
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """計算地球表面距離（公里）"""
-    R = 6371
-    lat1_rad = math.radians(lat1)
-    lat2_rad = math.radians(lat2)
-    delta_lat = math.radians(lat2 - lat1)
-    delta_lon = math.radians(lon2 - lon1)
-    a = math.sin(delta_lat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    R = 6371.0  # Earth radius in kilometers
+    lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(radians, [lat1, lon1, lat2, lon2])
+    dlon = lon2_rad - lon1_rad
+    dlat = lat2_rad - lat1_rad
+    a = sin(dlat / 2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return R * c
 
-def find_nearest_youbike(user_lat, user_lon, youbike_df, min_bikes=3):
-    """找最近的 YouBike 站點"""
-    print(f"\n🔍 正在尋找最近的 YouBike 站點...")
-    print(f"   您的位置: ({user_lat:.4f}, {user_lon:.4f})")
+def calculate_biking_time(distance_km, speed_kmh):
+    """Calculates biking time in minutes."""
+    return (distance_km / speed_kmh) * 60
+
+def find_nearest_point(target_lat, target_lon, points_df, lat_col='lat', lon_col='lon'):
+    """
+    Finds the single nearest point (row) from a DataFrame to a target coordinate.
+    """
+    if points_df.empty:
+        return None
     
-    available_stations = youbike_df[youbike_df['available_rent_bikes'] >= min_bikes].copy()
-    if len(available_stations) == 0:
-        print("⚠️ 找不到符合最低車輛數的站點，將使用所有站點進行搜尋。")
-        available_stations = youbike_df.copy()
-    
-    available_stations['distance'] = available_stations.apply(
-        lambda row: haversine_distance(user_lat, user_lon, row['latitude'], row['longitude']),
+    distances = points_df.apply(
+        lambda row: haversine_distance(target_lat, target_lon, row[lat_col], row[lon_col]),
         axis=1
     )
     
-    nearest = available_stations.nsmallest(1, 'distance').iloc[0]
-    print(f"✅ 最近站點: {nearest['sna']}")
-    print(f"   距離: {nearest['distance']*1000:.0f} 公尺")
-    print(f"   可借車輛: {nearest['available_rent_bikes']} 輛")
-    
-    return nearest
+    nearest_index = distances.idxmin()
+    return points_df.loc[nearest_index]
 
-def find_nearby_attractions(lat, lon, attractions_df, radius_meters=300):
-    """找附近景點"""
-    if attractions_df.empty:
-        return []
-        
-    nearby = []
-    for _, attraction in attractions_df.iterrows():
-        distance = haversine_distance(lat, lon, attraction['nlat'], attraction['elong']) * 1000
-        if distance <= radius_meters:
-            nearby.append({
-                'name': attraction.get('name', '未知景點'),
-                'address': attraction.get('address', '無地址'),
-                'distance': distance,
-                'lat': attraction['nlat'],
-                'lon': attraction['elong']
-            })
+def find_points_near_path(path_segment, points_df, threshold_km=0.2):
+    """
+    Finds all points within a certain distance of a line segment.
+    """
+    (lat1, lon1), (lat2, lon2) = path_segment
     
-    nearby.sort(key=lambda x: x['distance'])
-    return nearby
+    # Simple bounding box for quick filtering
+    min_lat, max_lat = min(lat1, lat2) - 0.01, max(lat1, lat2) + 0.01
+    min_lon, max_lon = min(lon1, lon2) - 0.01, max(lon1, lon2) + 0.01
+
+    nearby_points = points_df[
+        (points_df['nlat'].between(min_lat, max_lat)) &
+        (points_df['elong'].between(min_lon, max_lon))
+    ]
+    
+    # A more precise check can be added here if needed, but this is often sufficient.
+    return nearby_points

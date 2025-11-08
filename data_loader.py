@@ -1,65 +1,52 @@
 # data_loader.py
-import requests
 import pandas as pd
-import geocoder
 
-def get_user_location_auto():
+def load_youbike_data_from_api(api_data):
     """
-    使用 geocoder 自動獲取使用者當前位置。
-    如果失敗，則返回預設的固定位置。
+    Processes the raw JSON data from the YouBike v2 API into a clean pandas DataFrame.
+    It standardizes column names for consistent use throughout the application.
     """
-    print("📍 正在自動獲取您的目前位置...")
-    g = geocoder.ip('me')
-    
-    if g.ok and g.latlng:
-        lat, lon = g.latlng
-        address = g.address or "未知地址"
-        print(f"✅ 位置獲取成功: ({lat:.4f}, {lon:.4f})")
-        print(f"   地址: {address}")
-        return {'lat': lat, 'lon': lon, 'address': address}
-    else:
-        print("⚠️ 自動定位失敗，將使用預設位置（臺大新體育館附近）。")
-        # 返回預設位置
-        lat, lon = 25.021777051200228, 121.5354050968437
-        return {'lat': lat, 'lon': lon, 'address': '臺大新體育館附近 (預設)'}
-
-def fetch_youbike_data():
-    """抓取 YouBike 2.0 即時資料"""
-    print("🚲 正在抓取 YouBike 即時資料...")
-    url = "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status() # 如果請求失敗 (如 404, 500)，會拋出異常
-        data = response.json()
-        
-        df = pd.DataFrame(data)
-        df = df[['sno', 'sna', 'sarea', 'latitude', 'longitude', 'available_rent_bikes', 'available_return_bikes']]
-        
-        df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
-        df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
-        df['available_rent_bikes'] = pd.to_numeric(df['available_rent_bikes'], errors='coerce').fillna(0).astype(int)
-        df['available_return_bikes'] = pd.to_numeric(df['available_return_bikes'], errors='coerce').fillna(0).astype(int)
-        
-        df = df.dropna(subset=['latitude', 'longitude'])
-        
-        print(f"✅ 成功獲取 {len(df)} 個 YouBike 站點")
-        return df
-    except requests.exceptions.RequestException as e:
-        print(f"❌ 抓取 YouBike 資料失敗: 網路錯誤 ({e})")
-        return pd.DataFrame() # 返回空 DataFrame
-    except Exception as e:
-        print(f"❌ 處理 YouBike 資料時發生未知錯誤: {e}")
+    if not isinstance(api_data, list):
+        print("Invalid or empty API data received.")
         return pd.DataFrame()
 
+    # Chain all pandas operations for a cleaner, more readable workflow
+    df = (
+        pd.DataFrame(api_data)
+        # 1. Select and rename the columns we care about in one step
+        .rename(columns={
+            'sna': 'name',
+            'latitude': 'lat',
+            'longitude': 'lon',
+            'available_rent_bikes': 'available_bikes'
+        })
+        # 2. Keep only the columns we need
+        [['name', 'lat', 'lon', 'available_bikes']]
+        # 3. Convert data types, create new columns, or clean data
+        .assign(
+            lat=lambda x: pd.to_numeric(x['lat'], errors='coerce'),
+            lon=lambda x: pd.to_numeric(x['lon'], errors='coerce'),
+            available_bikes=lambda x: pd.to_numeric(x['available_bikes'], errors='coerce').fillna(0).astype(int)
+        )
+        # 4. Drop any rows that couldn't be parsed correctly
+        .dropna(subset=['lat', 'lon'])
+    )
+    
+    print(f"✅ Processed {len(df)} YouBike stations.")
+    return df
 
-def fetch_attractions_from_csv(filepath="taipei_attractions.csv"):
-    """從本地 CSV 讀取景點資料"""
-    print("🏛️ 正在讀取台北景點資料...")
+
+def load_attractions(csv_path):
+    """
+    Loads Taipei attractions data from a CSV file.
+    (This function remains the same)
+    """
     try:
-        df = pd.read_csv(filepath)
-        df = df[pd.notna(df['nlat']) & pd.notna(df['elong'])]
-        print(f"✅ 成功讀取 {len(df)} 個景點")
+        df = pd.read_csv(csv_path)
+        df['nlat'] = pd.to_numeric(df['nlat'], errors='coerce')
+        df['elong'] = pd.to_numeric(df['elong'], errors='coerce')
+        df.dropna(subset=['nlat', 'elong'], inplace=True)
         return df
     except FileNotFoundError:
-        print(f"❌ 找不到景點資料檔案: {filepath}")
+        print(f"Error: The file at {csv_path} was not found.")
         return pd.DataFrame()
